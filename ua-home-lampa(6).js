@@ -1,31 +1,149 @@
-/* Lampa.plugin — джерело UA (головна + історія + самооновлення + більше розділів) */
+/* Lampa.plugin — UAFlix / UA Serial (як Жанри UA, ряди на головній) + цікаві розділи + самооновлення */
 (function () {
     'use strict';
 
-    if (window.__ua_source_plugin_v3) return;
-    window.__ua_source_plugin_v3 = true;
-
-    var SOURCE_NAME = 'ua';
-    var SOURCE_TITLE = 'UA';
+    if (window.__ua_home_plugin_v2) return;
+    window.__ua_home_plugin_v2 = true;
 
     function wait(cb) {
-        if (window.Lampa && Lampa.Api && Lampa.Params && Lampa.Storage) cb();
-        else setTimeout(function () { wait(cb); }, 150);
+        if (window.Lampa && Lampa.Api && Lampa.ContentRows) cb();
+        else setTimeout(function () { wait(cb); }, 120);
     }
 
     wait(function () {
 
-        var memCache = {};
-        var CACHE_TTL = 30 * 60 * 1000; // 30 хв
+        function setting(name, def) {
+            var v = Lampa.Storage.get(name, def);
+            if (v === 'true') return true;
+            if (v === 'false') return false;
+            return (v === undefined || v === null) ? def : v;
+        }
 
         function today() {
             return new Date().toISOString().slice(0, 10);
         }
 
-        function yearAgo() {
-            var d = new Date();
-            d.setFullYear(d.getFullYear() - 1);
-            return d.toISOString().slice(0, 10);
+        function pluginOn() {
+            return setting('ua_home_enable', true) !== false;
+        }
+
+        // ===== РЯДИ =====
+        var ROWS = [
+            // --- Тренди ---
+            { key: 'uah_trend', title: 'Зараз у тренді', def: true, type: 'all',
+              special: 'trending' },
+
+            // --- UAFlix ---
+            { key: 'uah_new', title: 'UAFlix · Новинки', def: true, type: 'movie',
+              sort: 'primary_release_date.desc', dynamicDates: true,
+              filter: { 'vote_count.gte': '20', include_adult: 'false' } },
+            { key: 'uah_pop_m', title: 'UAFlix · Популярні фільми', def: true, type: 'movie',
+              sort: 'popularity.desc',
+              filter: { include_adult: 'false', 'vote_count.gte': '50' } },
+            { key: 'uah_top_m', title: 'UAFlix · Топ фільмів', def: true, type: 'movie',
+              sort: 'vote_average.desc',
+              filter: { include_adult: 'false', 'vote_count.gte': '200' } },
+            { key: 'uah_uk_m', title: 'UAFlix · Українською', def: true, type: 'movie',
+              sort: 'popularity.desc',
+              filter: { with_original_language: 'uk', include_adult: 'false', 'vote_count.gte': '5' } },
+            { key: 'uah_anim', title: 'UAFlix · Мультфільми', def: true, type: 'movie', genre: 16 },
+            { key: 'uah_action', title: 'UAFlix · Бойовики', def: true, type: 'movie', genre: 28 },
+            { key: 'uah_comedy', title: 'UAFlix · Комедії', def: true, type: 'movie', genre: 35 },
+            { key: 'uah_docs', title: 'UAFlix · Документальні', def: false, type: 'movie', genre: 99 },
+
+            // --- Приховані перлини ---
+            { key: 'uah_hidden', title: 'Приховані перлини', def: true, type: 'movie',
+              sort: 'vote_average.desc',
+              filter: {
+                  include_adult: 'false',
+                  'vote_count.gte': '40',
+                  'vote_count.lte': '400',
+                  'vote_average.gte': '7.3'
+              } },
+
+            // --- Класика ---
+            { key: 'uah_classic', title: 'Класика', def: false, type: 'movie',
+              sort: 'vote_average.desc',
+              filter: {
+                  include_adult: 'false',
+                  'vote_count.gte': '800',
+                  'primary_release_date.lte': '2005-01-01'
+              } },
+
+            // --- Скоро ---
+            { key: 'uah_soon', title: 'Скоро на екранах', def: true, type: 'movie',
+              sort: 'primary_release_date.asc',
+              filter: {
+                  include_adult: 'false',
+                  'primary_release_date.gte': today(),
+                  'vote_count.gte': '5'
+              } },
+
+            // --- UA Serial ---
+            { key: 'uah_ser_new', title: 'UA Serial · Нові серії', def: true, type: 'tv',
+              sort: 'first_air_date.desc', dynamicDates: true,
+              filter: { 'vote_count.gte': '10', include_adult: 'false' } },
+            { key: 'uah_ser_pop', title: 'UA Serial · Популярні серіали', def: true, type: 'tv',
+              sort: 'popularity.desc',
+              filter: { include_adult: 'false', 'vote_count.gte': '30' } },
+            { key: 'uah_ser_top', title: 'UA Serial · Топ серіалів', def: true, type: 'tv',
+              sort: 'vote_average.desc',
+              filter: { include_adult: 'false', 'vote_count.gte': '100' } },
+            { key: 'uah_uk_s', title: 'UA Serial · Українською', def: true, type: 'tv',
+              sort: 'popularity.desc',
+              filter: { with_original_language: 'uk', include_adult: 'false', 'vote_count.gte': '3' } },
+            { key: 'uah_dorama', title: 'UA Serial · Дорами', def: true, type: 'tv',
+              sort: 'popularity.desc',
+              filter: { with_original_language: 'ko|ja|zh|th', include_adult: 'false', 'vote_count.gte': '20' } },
+            { key: 'uah_anime', title: 'UA Serial · Аніме', def: true, type: 'tv', genre: 16,
+              filter: { with_original_language: 'ja', include_adult: 'false' } },
+            { key: 'uah_cart', title: 'UA Serial · Мультсеріали', def: true, type: 'tv', genre: 16 }
+        ];
+
+        var memCache = {};
+        var lastDay = today();
+        var CACHE_TTL = 4 * 3600 * 1000; // 4 години
+
+        function clearMemCache() {
+            memCache = {};
+            lastDay = today();
+            Lampa.Storage.set('ua_home_last_clear', String(Date.now()));
+        }
+
+        function ensureFreshDay() {
+            if (today() !== lastDay) {
+                clearMemCache();
+            }
+        }
+
+        function buildUrl(r) {
+            ensureFreshDay();
+
+            // Спеціальний рядок — тренди
+            if (r.special === 'trending') {
+                return 'trending/all/day?language=uk&_d=' + today();
+            }
+
+            var media = r.type === 'tv' ? 'tv' : 'movie';
+            var q = 'discover/' + media + '?sort_by=' + (r.sort || 'popularity.desc');
+
+            if (r.filter) {
+                for (var k in r.filter) {
+                    q += '&' + k + '=' + encodeURIComponent(r.filter[k]);
+                }
+            } else if (r.genre) {
+                q += '&with_genres=' + r.genre +
+                     '&include_adult=false&vote_count.gte=40';
+            }
+
+            if (r.dynamicDates || r.genre) {
+                if (media === 'movie') q += '&primary_release_date.lte=' + today();
+                else q += '&first_air_date.lte=' + today();
+            }
+
+            q += '&language=uk';
+            q += '&_d=' + today();
+            return q;
         }
 
         function normalize(results) {
@@ -37,467 +155,201 @@
                 var key = (c.id || '') + '_' + (c.media_type || c.name || c.title || '');
                 if (seen[key]) return false;
                 seen[key] = true;
-                c.source = c.source || SOURCE_NAME;
+                c.promo = c.overview;
+                c.promo_title = c.name || c.title;
                 if (!c.media_type) {
                     c.media_type = (c.first_air_date || c.name) ? 'tv' : 'movie';
                 }
-                c.promo = c.overview;
-                c.promo_title = c.name || c.title;
+                c.source = 'tmdb';
                 return true;
             });
         }
 
-        function disco(media, sort, extra) {
-            var q = 'discover/' + media + '?sort_by=' + (sort || 'popularity.desc') +
-                '&language=uk&include_adult=false';
-            if (extra) {
-                for (var k in extra) {
-                    q += '&' + k + '=' + encodeURIComponent(extra[k]);
-                }
-            }
-            return q;
-        }
+        function loadRow(title, url, ready) {
+            ensureFreshDay();
 
-        function fetchTmdb(url, title, call) {
-            var cacheKey = url;
             var now = Date.now();
-            if (memCache[cacheKey] && (now - memCache[cacheKey].ts) < CACHE_TTL) {
-                var cached = memCache[cacheKey].data;
-                call({
-                    title: title,
-                    name: title,
-                    results: (cached.results || []).slice(0)
-                });
+            var entry = memCache[url];
+            if (entry && (now - entry.ts) < CACHE_TTL) {
+                ready(entry.data);
                 return;
             }
 
-            if (Lampa.Api && Lampa.Api.list) {
-                Lampa.Api.list(
-                    { source: 'tmdb', url: url },
-                    function (json) {
-                        json = json || {};
-                        var results = normalize(json.results).slice(0, 20);
-                        var data = { title: title, name: title, results: results };
-                        memCache[cacheKey] = { ts: Date.now(), data: data };
-                        call(data);
-                    },
-                    function () {
-                        directTmdb(url, title, call);
-                    }
-                );
-            } else {
-                directTmdb(url, title, call);
-            }
-        }
-
-        function directTmdb(url, title, call) {
-            try {
-                var full = url;
-                if (full.indexOf('http') !== 0) {
-                    var key = (Lampa.TMDB && Lampa.TMDB.key) ? Lampa.TMDB.key() : '';
-                    full = 'https://api.themoviedb.org/3/' + url.replace(/^\//, '');
-                    full += (full.indexOf('?') >= 0 ? '&' : '?') + 'api_key=' + key + '&language=uk';
-                }
-                var network = new Lampa.Reguest();
-                network.silent(full, function (json) {
+            Lampa.Api.list(
+                { source: 'tmdb', url: url },
+                function (json) {
                     json = json || {};
-                    var results = normalize(json.results).slice(0, 20);
-                    var data = { title: title, name: title, results: results };
-                    memCache[url] = { ts: Date.now(), data: data };
-                    call(data);
-                }, function () {
-                    call({ title: title, name: title, results: [] });
+                    json.results = normalize(json.results).slice(0, 20);
+                    json.title = title;
+                    json.name = title;
+                    memCache[url] = { ts: Date.now(), data: json };
+                    ready(json);
+                },
+                function () {
+                    ready({ title: title, name: title, results: [] });
+                }
+            );
+        }
+
+        // ===== РЯДИ НА ГОЛОВНІЙ =====
+        ROWS.forEach(function (r, i) {
+            Lampa.ContentRows.add({
+                name: r.key,
+                title: r.title,
+                screen: ['main'],
+                index: 30 + i,
+                call: function () {
+                    if (!pluginOn()) return [];
+                    if (setting('ua_home_on_main', true) === false) return [];
+                    if (setting(r.key, r.def) === false) return [];
+                    return function (ready) {
+                        loadRow(r.title, buildUrl(r), ready);
+                    };
+                }
+            });
+        });
+
+        // ===== НАЛАШТУВАННЯ =====
+        if (Lampa.SettingsApi) {
+            try {
+                Lampa.SettingsApi.addComponent({
+                    component: 'ua_home',
+                    name: 'UA Home',
+                    icon: '<svg viewBox="0 0 100 100"><rect x="12" y="12" width="76" height="76" rx="22" fill="none" stroke="currentColor" stroke-width="6"/><text x="50" y="62" text-anchor="middle" font-size="28" font-weight="700" fill="currentColor">UA</text></svg>'
+                });
+
+                Lampa.SettingsApi.addParam({
+                    component: 'ua_home',
+                    param: { name: 'ua_home_enable', type: 'trigger', default: true },
+                    field: { name: 'Увімкнути плагін', description: 'Ряди UAFlix / UA Serial на головній' }
+                });
+
+                Lampa.SettingsApi.addParam({
+                    component: 'ua_home',
+                    param: { name: 'ua_home_on_main', type: 'trigger', default: true },
+                    field: { name: 'Ряди на головній', description: 'Показувати рядки на головній сторінці' }
+                });
+
+                ROWS.forEach(function (r) {
+                    Lampa.SettingsApi.addParam({
+                        component: 'ua_home',
+                        param: { name: r.key, type: 'trigger', default: r.def },
+                        field: { name: r.title, description: 'Показувати цей ряд' }
+                    });
                 });
             } catch (e) {
-                call({ title: title, name: title, results: [] });
+                console.log('[UA Home] settings error', e);
             }
         }
 
-        function historyRow(type) {
-            var results = [];
-            try {
-                if (Lampa.Favorite && Lampa.Favorite.continues) {
-                    results = Lampa.Favorite.continues(type || 'tv') || [];
-                }
-            } catch (e) {}
+        // ===== МЕНЮ =====
+        var menuAdded = false;
 
-            results = (results || []).filter(function (e) {
-                return e && (e.poster_path || e.backdrop_path || e.img);
-            }).slice(0, 20);
-
-            results.forEach(function (e) {
-                if (!e.source) e.source = 'tmdb';
+        function openMenu() {
+            if (!pluginOn()) return;
+            var items = ROWS.filter(function (r) {
+                return setting(r.key, r.def) !== false;
+            }).map(function (r) {
+                return { title: r.title, row: r };
             });
 
-            return {
-                title: type === 'movie'
-                    ? (Lampa.Lang.translate('title_watched') || 'Історія фільмів')
-                    : (Lampa.Lang.translate('title_continue') || 'Продовжити перегляд'),
-                name: 'history_' + (type || 'tv'),
-                results: results
-            };
-        }
+            if (Lampa.Select && Lampa.Select.show) {
+                Lampa.Select.show({
+                    title: 'UA Home',
+                    items: items,
+                    onSelect: function (a) {
+                        if (!a || !a.row) return;
+                        var r = a.row;
 
-        // ===== MAIN =====
-        function main(params, oncomplite, onerror) {
-            params = params || {};
+                        if (r.special === 'trending') {
+                            Lampa.Activity.push({
+                                url: 'trending/all/day',
+                                title: r.title,
+                                component: 'category_full',
+                                source: 'tmdb',
+                                page: 1
+                            });
+                            return;
+                        }
 
-            var parts_data = [
-                // Історія
-                function (call) { call(historyRow('tv')); },
-                function (call) { call(historyRow('movie')); },
-
-                // Тренди
-                function (call) {
-                    fetchTmdb('trending/all/day?language=uk', 'Сьогодні в тренді', call);
-                },
-                function (call) {
-                    fetchTmdb('trending/movie/week?language=uk', 'Фільми тижня', call);
-                },
-                function (call) {
-                    fetchTmdb('trending/tv/week?language=uk', 'Серіали тижня', call);
-                },
-
-                // UAFlix — фільми
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'primary_release_date.desc', {
-                            'vote_count.gte': '15',
-                            'primary_release_date.lte': today()
-                        }),
-                        'UAFlix · Нові фільми',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'popularity.desc', { 'vote_count.gte': '40' }),
-                        'UAFlix · Популярні фільми',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'vote_average.desc', { 'vote_count.gte': '150' }),
-                        'UAFlix · Топ фільмів',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'popularity.desc', {
-                            with_original_language: 'uk',
-                            'vote_count.gte': '5'
-                        }),
-                        'UAFlix · Українською',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'popularity.desc', { with_genres: '16', 'vote_count.gte': '30' }),
-                        'UAFlix · Мультфільми',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'popularity.desc', { with_genres: '28', 'vote_count.gte': '30' }),
-                        'UAFlix · Бойовики',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'popularity.desc', { with_genres: '35', 'vote_count.gte': '40' }),
-                        'UAFlix · Комедії',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'popularity.desc', { with_genres: '99', 'vote_count.gte': '20' }),
-                        'UAFlix · Документальні',
-                        call
-                    );
-                },
-
-                // Приховані перлини
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'vote_average.desc', {
-                            'vote_count.gte': '30',
-                            'vote_count.lte': '300',
-                            'vote_average.gte': '7.2'
-                        }),
-                        'Приховані перлини',
-                        call
-                    );
-                },
-
-                // Класика
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'vote_average.desc', {
-                            'vote_count.gte': '500',
-                            'primary_release_date.lte': '2005-01-01'
-                        }),
-                        'Класика',
-                        call
-                    );
-                },
-
-                // Скоро
-                function (call) {
-                    fetchTmdb(
-                        disco('movie', 'primary_release_date.asc', {
-                            'primary_release_date.gte': today(),
-                            'vote_count.gte': '5'
-                        }),
-                        'Скоро на екранах',
-                        call
-                    );
-                },
-
-                // UA Serial
-                function (call) {
-                    fetchTmdb(
-                        disco('tv', 'first_air_date.desc', {
-                            'vote_count.gte': '8',
-                            'first_air_date.lte': today()
-                        }),
-                        'UA Serial · Нові серії',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('tv', 'popularity.desc', { 'vote_count.gte': '20' }),
-                        'UA Serial · Популярні серіали',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('tv', 'vote_average.desc', { 'vote_count.gte': '80' }),
-                        'UA Serial · Топ серіалів',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('tv', 'popularity.desc', {
-                            with_original_language: 'uk',
-                            'vote_count.gte': '3'
-                        }),
-                        'UA Serial · Українською',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('tv', 'popularity.desc', {
-                            with_original_language: 'ko',
-                            'vote_count.gte': '15'
-                        }),
-                        'UA Serial · Дорами',
-                        call
-                    );
-                },
-                function (call) {
-                    fetchTmdb(
-                        disco('tv', 'popularity.desc', {
-                            with_genres: '16',
-                            with_original_language: 'ja',
-                            'vote_count.gte': '15'
-                        }),
-                        'UA Serial · Аніме',
-                        call
-                    );
-                }
-            ];
-
-            function loadPart(partLoaded, partEmpty) {
-                Lampa.Api.partNext(parts_data, 6, partLoaded, partEmpty);
-            }
-
-            loadPart(oncomplite, onerror);
-            return loadPart;
-        }
-
-        // ===== CATEGORY =====
-        function category(params, oncomplite, onerror) {
-            params = params || {};
-            var url = params.url || 'movie';
-            var parts_data = [];
-
-            if (url === 'movie') {
-                parts_data.push(function (call) { call(historyRow('movie')); });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('movie', 'popularity.desc', { 'vote_count.gte': '40' }), 'Популярні', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('movie', 'primary_release_date.desc', {
-                        'vote_count.gte': '15',
-                        'primary_release_date.lte': today()
-                    }), 'Новинки', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('movie', 'vote_average.desc', { 'vote_count.gte': '150' }), 'Топ', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('movie', 'popularity.desc', { with_genres: '16' }), 'Мультфільми', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('movie', 'popularity.desc', { with_genres: '35' }), 'Комедії', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('movie', 'popularity.desc', { with_original_language: 'uk' }), 'Українською', call);
-                });
-            } else {
-                parts_data.push(function (call) { call(historyRow('tv')); });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('tv', 'popularity.desc', { 'vote_count.gte': '20' }), 'Популярні', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('tv', 'first_air_date.desc', {
-                        'vote_count.gte': '8',
-                        'first_air_date.lte': today()
-                    }), 'Нові серії', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('tv', 'vote_average.desc', { 'vote_count.gte': '80' }), 'Топ', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('tv', 'popularity.desc', { with_original_language: 'ko' }), 'Дорами', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('tv', 'popularity.desc', {
-                        with_genres: '16',
-                        with_original_language: 'ja'
-                    }), 'Аніме', call);
-                });
-                parts_data.push(function (call) {
-                    fetchTmdb(disco('tv', 'popularity.desc', { with_original_language: 'uk' }), 'Українською', call);
-                });
-            }
-
-            function loadPart(partLoaded, partEmpty) {
-                Lampa.Api.partNext(parts_data, 6, partLoaded, partEmpty);
-            }
-
-            loadPart(oncomplite, onerror);
-            return loadPart;
-        }
-
-        function list(params, oncomplite, onerror) {
-            params = params || {};
-            var p = Lampa.Arrays.clone(params);
-            p.source = 'tmdb';
-            if (Lampa.Api.sources.tmdb && Lampa.Api.sources.tmdb.list) {
-                return Lampa.Api.sources.tmdb.list(p, function (data) {
-                    if (data && data.results) data.results = normalize(data.results);
-                    oncomplite(data);
-                }, onerror);
-            }
-            onerror && onerror();
-        }
-
-        function full(params, oncomplite, onerror) {
-            params = params || {};
-            var p = Lampa.Arrays.clone(params);
-            p.source = 'tmdb';
-            if (Lampa.Api.sources.tmdb && Lampa.Api.sources.tmdb.full) {
-                return Lampa.Api.sources.tmdb.full(p, oncomplite, onerror);
-            }
-            onerror && onerror();
-        }
-
-        function search(params, oncomplite) {
-            if (Lampa.Api.sources.tmdb && Lampa.Api.sources.tmdb.search) {
-                Lampa.Api.sources.tmdb.search(params, function (data) {
-                    if (data) {
-                        if (data.movie && data.movie.results) data.movie.results = normalize(data.movie.results);
-                        if (data.tv && data.tv.results) data.tv.results = normalize(data.tv.results);
+                        var media = r.type === 'tv' ? 'tv' : 'movie';
+                        var filter = {};
+                        if (r.filter) {
+                            for (var k in r.filter) filter[k] = r.filter[k];
+                        } else if (r.genre) {
+                            filter.with_genres = String(r.genre);
+                            filter.include_adult = 'false';
+                            filter['vote_count.gte'] = '40';
+                        }
+                        Lampa.Activity.push({
+                            url: 'discover/' + media,
+                            title: r.title,
+                            component: 'category_full',
+                            source: 'tmdb',
+                            page: 1,
+                            sort_by: r.sort || 'popularity.desc',
+                            card_type: true,
+                            filter: filter
+                        });
+                    },
+                    onBack: function () {
+                        Lampa.Controller.toggle('menu');
                     }
-                    oncomplite(data);
                 });
-            } else {
-                oncomplite({});
             }
         }
 
-        function person(params, oncomplite, onerror) {
-            var p = Lampa.Arrays.clone(params || {});
-            p.source = 'tmdb';
-            if (Lampa.Api.sources.tmdb && Lampa.Api.sources.tmdb.person) {
-                return Lampa.Api.sources.tmdb.person(p, oncomplite, onerror);
-            }
-            onerror && onerror();
-        }
-
-        function clear() {
-            memCache = {};
-            if (Lampa.Api.sources.tmdb && Lampa.Api.sources.tmdb.clear) {
-                Lampa.Api.sources.tmdb.clear();
-            }
-        }
-
-        var UA = {
-            main: main,
-            category: category,
-            full: full,
-            list: list,
-            search: search,
-            person: person,
-            clear: clear
-        };
-
-        function register() {
+        function addMenu() {
+            if (menuAdded) return;
+            if (!pluginOn()) return;
             try {
-                Lampa.Api.sources[SOURCE_NAME] = UA;
-
-                var sources = {};
-                try {
-                    Lampa.Arrays.extend(sources, Lampa.Params.values['source'] || {});
-                } catch (e) {}
-
-                sources.tmdb = sources.tmdb || 'TMDB';
-                sources.cub = sources.cub || 'CUB';
-                sources[SOURCE_NAME] = SOURCE_TITLE;
-
-                Lampa.Params.select('source', sources, Lampa.Storage.field('source') || 'tmdb');
-                console.log('[UA Source] v3+ ready');
+                var icon = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>';
+                if (Lampa.Menu && Lampa.Menu.addButton) {
+                    Lampa.Menu.addButton(icon, 'UA Home', openMenu);
+                    menuAdded = true;
+                }
             } catch (e) {
-                console.log('[UA Source] register error', e);
+                console.log('[UA Home] menu error', e);
             }
         }
 
-        register();
-
+        // ===== САМООНОВЛЕННЯ =====
         if (Lampa.Listener) {
-            Lampa.Listener.follow('app', function (e) {
-                if (e && e.type === 'ready') register();
+            Lampa.Listener.follow('menu', function (e) {
+                if (e.type === 'start' || e.type === 'end') setTimeout(addMenu, 80);
             });
 
+            Lampa.Listener.follow('app', function (e) {
+                if (e && e.type === 'ready') {
+                    ensureFreshDay();
+                    setTimeout(addMenu, 500);
+                }
+            });
+
+            // При поверненні на головну — перевіряємо, чи не застарів кеш
             Lampa.Listener.follow('activity', function (e) {
                 if (!e || (e.type !== 'start' && e.type !== 'archive')) return;
                 try {
                     var act = Lampa.Activity.active && Lampa.Activity.active();
-                    if (!act) return;
-                    if (act.component === 'main' && Lampa.Storage.field('source') === SOURCE_NAME) {
-                        var last = parseInt(Lampa.Storage.get('ua_source_last_refresh', '0'), 10) || 0;
-                        if (Date.now() - last > CACHE_TTL) {
-                            memCache = {};
-                            Lampa.Storage.set('ua_source_last_refresh', String(Date.now()));
+                    if (act && act.component === 'main') {
+                        ensureFreshDay();
+                        var lastClear = parseInt(Lampa.Storage.get('ua_home_last_clear', '0'), 10) || 0;
+                        if (Date.now() - lastClear > CACHE_TTL) {
+                            clearMemCache();
                         }
                     }
                 } catch (err) {}
             });
         }
 
+        // Періодичне очищення (якщо Lampa довго відкрита)
         setInterval(function () {
-            memCache = {};
-        }, CACHE_TTL);
+            ensureFreshDay();
+        }, 30 * 60 * 1000); // кожні 30 хв
+
+        setTimeout(addMenu, 1500);
+        setTimeout(addMenu, 3500);
+
+        console.log('[UA Home] v2+ — з трендами, перлинами та самооновленням');
     });
 })();
